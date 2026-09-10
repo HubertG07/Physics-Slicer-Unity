@@ -1,7 +1,9 @@
 using System;
 using UnityEngine;
-using UnityEngine.SocialPlatforms;
 
+/// <summary>
+/// Visualise mesh vertex along with triangle intersection points using scene gizmos
+/// </summary>
 public class MeshSliceTriangles : MonoBehaviour
 {
     [Header("Plane Config")]
@@ -57,6 +59,9 @@ public class MeshSliceTriangles : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Checks if an edge intersects the surface boundary
+    /// </summary>
     private void CheckAndDrawEdge(Vector3 vertexA, Vector3 vertexB, float distA, float distB)
     {
         if (distA * distB < 0f) // Opposite signs means the edge is cut
@@ -69,10 +74,25 @@ public class MeshSliceTriangles : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Calculates the point of intersection along the edge of two vertices
+    /// </summary>
+    /// <param name="vertexA">Position of the first vertex</param>
+    /// <param name="vertexB">Position of the second vertex</param>
+    /// <param name="distA">Scalar distance at <paramref name="vertexA"/></param>
+    /// <param name="distB">Scalar distance at <paramref name="vertexB"/></param>
+    /// <returns>Interpolated position where surface intersects the edge</returns>
     private Vector3 IntersectEdge(Vector3 vertexA, Vector3 vertexB, float distA, float distB)
     {
-        // Follow the equation t = |distA| / (|distA9| + |distB|)
-        float t = Mathf.Abs(distA) / (Mathf.Abs(distA) + Mathf.Abs(distB));
+        float absA = Mathf.Abs(distA);
+        float absB = Mathf.Abs(distB);
+        float denominator = absA + absB;
+
+        // Prevent division by 0 if distance are close to it
+        if (denominator < 0.00001f) return vertexA;
+
+        // Follow the equation t = |distA| / (|distA| + |distB|)
+        float t = absA / denominator;
 
         return Vector3.Lerp(vertexA, vertexB, t);
     }
