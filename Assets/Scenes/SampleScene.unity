@@ -509,6 +509,7 @@ GameObject:
   - component: {fileID: 786240586}
   - component: {fileID: 786240585}
   - component: {fileID: 786240584}
+  - component: {fileID: 786240589}
   m_Layer: 0
   m_Name: Cube
   m_TagString: Untagged
@@ -523,12 +524,13 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 786240583}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: db51fbfd3d02f4145b809864d8e34c9d, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::MeshSliceTest
   planeTransform: {fileID: 1688251974}
+  gizmoSphereRadius: 0.05
 --- !u!65 &786240585
 BoxCollider:
   m_ObjectHideFlags: 0
@@ -622,6 +624,20 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &786240589
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 786240583}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c0fe36587f922b449a2eac5c4f4257db, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::MeshSliceTriangles
+  planeTransform: {fileID: 1688251974}
+  gizmoSphereRadius: 0.05
 --- !u!1 &832575517
 GameObject:
   m_ObjectHideFlags: 0

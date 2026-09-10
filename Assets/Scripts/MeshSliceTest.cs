@@ -36,12 +36,12 @@ public class MeshSliceTest : MonoBehaviour
         }
 
         Vector3 localPlanePosition = transform.InverseTransformPoint(planeTransform.position);
-        Vector3 localPlaeNormal = transform.InverseTransformDirection(planeTransform.up).normalized;
+        Vector3 localPlaneNormal = transform.InverseTransformDirection(planeTransform.up).normalized;
 
         // For loop to draw each vertex
         for (int count = 0; count < localVertices.Length; count++)
         {
-            float distance = Vector3.Dot((localVertices[count] - localPlanePosition), localPlaeNormal);
+            float distance = Vector3.Dot((localVertices[count] - localPlanePosition), localPlaneNormal);
 
             Gizmos.color = (distance >= 0f) ? Color.green : Color.red;
             Gizmos.DrawSphere(transform.TransformPoint(localVertices[count]), gizmoSphereRadius);
