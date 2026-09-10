@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEditor.EditorTools;
 using UnityEngine;
 
@@ -15,6 +16,7 @@ public class MeshSliceTest : MonoBehaviour
     [SerializeField] private float gizmoSphereRadius = 0.05f;
 
     private MeshFilter targetObjectMeshFilter;
+    private Vector3[] localVertices;
 
     void Awake()
     {
@@ -26,26 +28,23 @@ public class MeshSliceTest : MonoBehaviour
         // Ensure components exist before drawing any gizmos 
         if (planeTransform == null) return;
 
-        if (targetObjectMeshFilter == null)
+        if (targetObjectMeshFilter == null || localVertices == null || localVertices.Length == 0)
         {
             // Attempt to grab the mesh filter in case Awake failed
             CacheComponents();
-            if (targetObjectMeshFilter == null || targetObjectMeshFilter.sharedMesh == null) return;
+            if (targetObjectMeshFilter == null || targetObjectMeshFilter.sharedMesh == null ) return;
         }
 
-        Vector3 planePosition = planeTransform.position;
-        Vector3 planeNormal = planeTransform.up;
-
-        Vector3[] localVertices = targetObjectMeshFilter.sharedMesh.vertices;
+        Vector3 localPlanePosition = transform.InverseTransformPoint(planeTransform.position);
+        Vector3 localPlaeNormal = transform.InverseTransformDirection(planeTransform.up).normalized;
 
         // For loop to draw each vertex
         for (int count = 0; count < localVertices.Length; count++)
         {
-            Vector3 vertexWorldPosition = transform.TransformPoint(localVertices[count]);
-            float distance = Vector3.Dot((vertexWorldPosition - planePosition), planeNormal);
+            float distance = Vector3.Dot((localVertices[count] - localPlanePosition), localPlaeNormal);
 
             Gizmos.color = (distance >= 0f) ? Color.green : Color.red;
-            Gizmos.DrawSphere(vertexWorldPosition, gizmoSphereRadius);
+            Gizmos.DrawSphere(transform.TransformPoint(localVertices[count]), gizmoSphereRadius);
         }
     }
 
@@ -55,5 +54,6 @@ public class MeshSliceTest : MonoBehaviour
     private void CacheComponents()
     {
         targetObjectMeshFilter = GetComponent<MeshFilter>();
+        localVertices = targetObjectMeshFilter.sharedMesh.vertices;
     }
 }
