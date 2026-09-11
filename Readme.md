@@ -23,7 +23,7 @@ Breakdown of the time invested during development
 | Date | Time Window | Session Duration | Focus Area |
 | --- | --- | --- | --- |
 | **10th Sept 2026** | 18:25-20:54 | 2 hrs 29 mins | Plane dot product math & Dymanic mesh reconstruction (Stages 1-3) |
-| **11th Sept 2026** | 14:30-TBD | TBD | Cap filling. physics Rigidbody generation & potentially more |
+| **11th Sept 2026** | 14:30-16:14 & 18:00 | TBD | Cap filling. physics Rigidbody generation & potentially more |
 | **Future** | TBD | TBD | Slice Force Impulses + Test Scene + Adjustable settings (if a force is applied etc) |
 
 * **Project Start Date:** September 10th 2026
@@ -75,9 +75,19 @@ $$P_{\text{cut}} = \text{Vector3.Lerp}(VertexA, VertexB, t)$$
 * **Objective:** Preserve the original texture mapping acrossed the sliced edges and project dynamic 2D texture coordinates onto the newly capped faces
 * **Technical Overview:**
     * **Edge UV Interpolation:** Evaluate the UV coordinates at the intersection points using dual linear interpolation (`Vector2.Lerp`) weighted by the scalar distance ratio $t$
-    * **Planar Cap Projection:** Generate the capping UVs by projecting the 3D point offsets relative to the centroid onto the local orthogonal tangent axes ($\mathbf{U}, \,mathbf{V}$):
+    * **Planar Cap Projection:** Generate the capping UVs by projecting the 3D point offsets relative to the centroid onto the local orthogonal tangent axes ($\mathbf{U}, \,\mathbf{V}$):
+
     $$\text{UV}_{\text{cap}} = \left((P - C) \cdot \mathbf{U}, \, (P - C) \cdot \mathbf{V}\right)$$
     * **Surface Lighting:** Rebuild the mesh tangent vectors (`RecalculateTangents()`) to ensure directional lighting and normal maps across the sub-meshes
+
+## Stage 6: Dynamic Physics & Mass Distribution (MeshSlicePhysics.cs):
+* **Objective:** Instantiate physcial sliced mesh fragments with proportionate mass, centered tensors and convex colliders with a seperation impulse
+* **Technical Overview:**
+    * **Volume Analysis:** Evaluate the exact 3D closed mesh volume ($V$) using a tetrahedral signed triple-product summation:
+    $$V = \left| \sum \frac{\mathbf{P}_1 \cdot (\mathbf{P}_2 \times \mathbf{P}_3)}{6} \right|$$
+    * **Proprtional Mass Split:** Distribute the parent's mass to sub meshes relative to the volumetric ratio ($M_{\text{sub}} = M_{\text{total}} \cdot \frac{V_{\text{sub}}}{V_{\text{total}}}$)
+    * **Center of Mass Alignment:** Shift the local vertex positions to align the local space origin with the centroid ($\bar{C}$), ensuring a stable rotation when calling `ResertInertiaTensor()`
+    * **RigidBody State Transfer:** Generate a convex `MeshCollider` component which inherits the parent's linear and angular velocities while also applying a plane-normal impulse ($\mathbf{F}_{\text{impulse}}$) to seperate the pieces
 ---
 ## Takeaways & Learnings
 Building this slicer helped me learn critical low-level 3D graphics and physics concepts:
