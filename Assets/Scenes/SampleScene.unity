@@ -512,6 +512,7 @@ GameObject:
   - component: {fileID: 786240589}
   - component: {fileID: 786240590}
   - component: {fileID: 786240591}
+  - component: {fileID: 786240592}
   m_Layer: 0
   m_Name: Cube
   m_TagString: Untagged
@@ -660,11 +661,24 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 786240583}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 636680a5e493a2c4b9840847418c4404, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::MeshSliceFilling
+  planeTransform: {fileID: 1688251974}
+--- !u!114 &786240592
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 786240583}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 47107d460585f97468e678220b1e547d, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::MeshSliceUV
   planeTransform: {fileID: 1688251974}
 --- !u!1 &832575517
 GameObject:

@@ -70,6 +70,14 @@ $$P_{\text{cut}} = \text{Vector3.Lerp}(VertexA, VertexB, t)$$
     * **2D Plane Projection:** Derive the local tangent and bitangent vectors using the cross product to conver the 3D edge points into 2D planar offsets
     * **Polar Angle Sorting:** Order the boundary vertices counter-clockwise using `Mathf.Atan2(y, x)`relative to the tangent plane
     * **Triangle Fan Reconstruction:** Triangulates the sorted points around the centroid, reversing the index winding orders between the top and bottom sub-meshes to ensure correctly facing normals
+
+## Stage 5: UV Interpolation & Planar Projection Mapping (MeshSliceUV.cs):
+* **Objective:** Preserve the original texture mapping acrossed the sliced edges and project dynamic 2D texture coordinates onto the newly capped faces
+* **Technical Overview:**
+    * **Edge UV Interpolation:** Evaluate the UV coordinates at the intersection points using dual linear interpolation (`Vector2.Lerp`) weighted by the scalar distance ratio $t$
+    * **Planar Cap Projection:** Generate the capping UVs by projecting the 3D point offsets relative to the centroid onto the local orthogonal tangent axes ($\mathbf{U}, \,mathbf{V}$):
+    $$\text{UV}_{\text{cap}} = \left((P - C) \cdot \mathbf{U}, \, (P - C) \cdot \mathbf{V}\right)$$
+    * **Surface Lighting:** Rebuild the mesh tangent vectors (`RecalculateTangents()`) to ensure directional lighting and normal maps across the sub-meshes
 ---
 ## Takeaways & Learnings
 Building this slicer helped me learn critical low-level 3D graphics and physics concepts:

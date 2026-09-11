@@ -44,8 +44,8 @@ public class MeshSliceReconstruction : MonoBehaviour
     {
         if (planeTransform == null || targetMeshFilter == null) return;
 
-        MeshData aboveMesh = new MeshData();
-        MeshData belowMesh = new MeshData();
+        MeshDataOld aboveMesh = new MeshDataOld();
+        MeshDataOld belowMesh = new MeshDataOld();
 
         Vector3 localPlanePosition = transform.InverseTransformPoint(planeTransform.position);
         Vector3 localPlaneNormal = transform.InverseTransformDirection(planeTransform.up).normalized;
@@ -88,7 +88,7 @@ public class MeshSliceReconstruction : MonoBehaviour
     /// <summary>
     /// Add the unsplit triangle directly to the target mesh
     /// </summary>
-    private void AddUncutTriangle(MeshData meshData, Vector3 vertex0, Vector3 vertex1, Vector3 vertex2)
+    private void AddUncutTriangle(MeshDataOld meshData, Vector3 vertex0, Vector3 vertex1, Vector3 vertex2)
     {
         int indice0 = meshData.AddVertex(vertex0);
         int indice1 = meshData.AddVertex(vertex1);
@@ -99,7 +99,7 @@ public class MeshSliceReconstruction : MonoBehaviour
     /// <summary>
     /// Splits an intersecting triangle into smaller triangles across the plane boundary
     /// </summary>
-    private void SplitTriangle(MeshData above, MeshData below,
+    private void SplitTriangle(MeshDataOld above, MeshDataOld below,
                             Vector3 vertex0, Vector3 vertex1, Vector3 vertex2,
                             float dist0, float dist1, float dist2)
     {
@@ -130,8 +130,8 @@ public class MeshSliceReconstruction : MonoBehaviour
         Vector3 cutA = IntersectEdge(loneVert, pairVert1, loneDist, pairDist1);
         Vector3 cutB = IntersectEdge(loneVert, pairVert2, loneDist, pairDist2);
 
-        MeshData loneSideMesh = (loneDist >= 0) ? above : below;
-        MeshData pairSideMesh = (loneDist >= 0) ? below : above;
+        MeshDataOld loneSideMesh = (loneDist >= 0) ? above : below;
+        MeshDataOld pairSideMesh = (loneDist >= 0) ? below : above;
 
         AddUncutTriangle(loneSideMesh, loneVert, cutA, cutB);
 
@@ -177,7 +177,7 @@ public class MeshSliceReconstruction : MonoBehaviour
     /// <summary>
     /// Instantiates a real GameObject using the generated mesh data
     /// </summary>
-    private GameObject CreateSlicedObject(MeshData meshData, string name)
+    private GameObject CreateSlicedObject(MeshDataOld meshData, string name)
     {
         if (meshData.triangles.Count == 0) return null;
 
@@ -210,26 +210,3 @@ public class MeshSliceReconstruction : MonoBehaviour
     }
 }
 
-/// <summary>
-/// Container for constructing dyn amic mesh vertices and triangle indices
-/// </summary>
-public class MeshData
-{
-    public List<Vector3> vertices = new List<Vector3>();
-    public List<int> triangles = new List<int>();
-
-    // Helper to add a vertex and find its index
-    public int AddVertex(Vector3 position)
-    {
-        vertices.Add(position);
-        return vertices.Count - 1;
-    }
-
-    // Helper to add a triangle using three vertices
-    public void AddTriangle(int indice0, int indice1, int indice2)
-    {
-        triangles.Add(indice0);
-        triangles.Add(indice1);
-        triangles.Add(indice2);
-    }
-}
