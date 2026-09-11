@@ -23,12 +23,11 @@ Breakdown of the time invested during development
 | Date | Time Window | Session Duration | Focus Area |
 | --- | --- | --- | --- |
 | **10th Sept 2026** | 18:25-20:54 | 2 hrs 29 mins | Plane dot product math & Dymanic mesh reconstruction (Stages 1-3) |
-| **11th Sept 2026** | 14:30-16:14 & 18:00 | TBD | Cap filling. physics Rigidbody generation & potentially more |
-| **Future** | TBD | TBD | Slice Force Impulses + Test Scene + Adjustable settings (if a force is applied etc) |
+| **11th Sept 2026** | 14:30-16:14 & 18:00-19:25 | 3hrs 9 mins | Cap filling. physics Rigidbody generation & potentially more |
 
 * **Project Start Date:** September 10th 2026
-* **Project Finish Date:** Not yet completed
-* **Current Total Time:** ~2.5 Hours (Ongoing)
+* **Project Finish Date:** September 11th 2026
+* **Current Total Time:** 5 hrs 38 mins Hours (Finished)
 ---
 
 ## Technical Breakdown & Architecture
@@ -88,7 +87,16 @@ $$P_{\text{cut}} = \text{Vector3.Lerp}(VertexA, VertexB, t)$$
     * **Proprtional Mass Split:** Distribute the parent's mass to sub meshes relative to the volumetric ratio ($M_{\text{sub}} = M_{\text{total}} \cdot \frac{V_{\text{sub}}}{V_{\text{total}}}$)
     * **Center of Mass Alignment:** Shift the local vertex positions to align the local space origin with the centroid ($\bar{C}$), ensuring a stable rotation when calling `ResertInertiaTensor()`
     * **RigidBody State Transfer:** Generate a convex `MeshCollider` component which inherits the parent's linear and angular velocities while also applying a plane-normal impulse ($\mathbf{F}_{\text{impulse}}$) to seperate the pieces
+
+## Stage 7: Burst Optimization & Job System Parallelization (MeshSliceOptimisation.cs):
+* **Objective:** Offload high-volume distance calculations to multi-core worker threads using Unity's Job System and SIMD compilation
+* **Technical Overview:**
+    * **Parallel Job Execution:** Implements `IJobParallelFor` (`ClassifyVerticesJob`) to evaluate plane distance equations ($d = (P - P_0) \cdot \mathbf{N}$) across CPU threads
+    * **Burst Compilation:** Decorate jobs with `[BurstCompile]`, Compiling the math into SIMD-accelerated machine code
+    * **Unmanaged Allocation Management:** Allocates `NativeArray` buffers using `Allocator.TempJob` for cache-coherent contiguous memory access, disposing buffers after execution to prevent GC pressure:
+    $$\text{OutDistances}[i] = (\text{Vertices}[i] - \text{LocalPlanePosition}) \cdot \text{LocalPlaneNormal}$$
 ---
+
 ## Takeaways & Learnings
 Building this slicer helped me learn critical low-level 3D graphics and physics concepts:
 1. **Coordinate Space Efficiency:** Performing the dot product on the vector in local object space helped to elimate the need of transforming thousands of mesh vertices into world space every frame.
