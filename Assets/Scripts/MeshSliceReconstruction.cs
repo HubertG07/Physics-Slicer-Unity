@@ -1,8 +1,10 @@
 using System.Collections.Generic;
-using System.Runtime.CompilerServices;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
+/// <summary>
+/// Slices and reconstructs a mesh into two seperate game objects along a plane boundary
+/// </summary>
 [RequireComponent(typeof(MeshFilter))]
 public class MeshSliceReconstruction : MonoBehaviour
 {
@@ -35,6 +37,9 @@ public class MeshSliceReconstruction : MonoBehaviour
         SliceMesh();
     }
 
+    /// <summary>
+    /// Slices the mesh into two distinct meshes relevative to the plane's orientation and position
+    /// </summary>
     public void SliceMesh()
     {
         if (planeTransform == null || targetMeshFilter == null) return;
@@ -47,6 +52,7 @@ public class MeshSliceReconstruction : MonoBehaviour
 
         for (int i = 0; i < triangles.Length; i += 3)
         {
+            // Fetch position of all 3 vertices of the triangle face
             Vector3 vertex0 = localVertices[triangles[i]];
             Vector3 vertex1 = localVertices[triangles[i + 1]];
             Vector3 vertex2 = localVertices[triangles[i + 2]];
@@ -79,6 +85,9 @@ public class MeshSliceReconstruction : MonoBehaviour
         gameObject.SetActive(false);
     }
 
+    /// <summary>
+    /// Add the unsplit triangle directly to the target mesh
+    /// </summary>
     private void AddUncutTriangle(MeshData meshData, Vector3 vertex0, Vector3 vertex1, Vector3 vertex2)
     {
         int indice0 = meshData.AddVertex(vertex0);
@@ -87,6 +96,9 @@ public class MeshSliceReconstruction : MonoBehaviour
         meshData.AddTriangle(indice0, indice1, indice2);
     }
 
+    /// <summary>
+    /// Splits an intersecting triangle into smaller triangles across the plane boundary
+    /// </summary>
     private void SplitTriangle(MeshData above, MeshData below,
                             Vector3 vertex0, Vector3 vertex1, Vector3 vertex2,
                             float dist0, float dist1, float dist2)
@@ -132,6 +144,14 @@ public class MeshSliceReconstruction : MonoBehaviour
         pairSideMesh.AddTriangle(iPair2, iCutB, iCutA);
     }
 
+    /// <summary>
+    /// Calculates intersection point along edge of two vertices
+    /// </summary>
+    /// <param name="vertexA">Position of first vertex</param>
+    /// <param name="vertexB">Position of second vertex</param>
+    /// <param name="distA">Scalar distance at vertexA</param>
+    /// <param name="distB">Scalar distance at vertexB</param>
+    /// <returns>Interpolated position where plane intersects edge</returns>
     private Vector3 IntersectEdge(Vector3 a, Vector3 b, float distA, float distB)
     {
         float denom = Mathf.Abs(distA) + Mathf.Abs(distB);
@@ -154,6 +174,9 @@ public class MeshSliceReconstruction : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Instantiates a real GameObject using the generated mesh data
+    /// </summary>
     private GameObject CreateSlicedObject(MeshData meshData, string name)
     {
         if (meshData.triangles.Count == 0) return null;
@@ -187,6 +210,9 @@ public class MeshSliceReconstruction : MonoBehaviour
     }
 }
 
+/// <summary>
+/// Container for constructing dyn amic mesh vertices and triangle indices
+/// </summary>
 public class MeshData
 {
     public List<Vector3> vertices = new List<Vector3>();
