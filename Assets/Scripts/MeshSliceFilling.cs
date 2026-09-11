@@ -1,4 +1,6 @@
 using System.Collections.Generic;
+using System.Linq;
+using Unity.VisualScripting;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
@@ -6,13 +8,14 @@ using UnityEngine.InputSystem;
 /// Slices and reconstructs a mesh into two seperate game objects along a plane boundary
 /// </summary>
 [RequireComponent(typeof(MeshFilter))]
-public class MeshSliceReconstruction : MonoBehaviour
+public class MeshSliceFilling : MonoBehaviour
 {
     [SerializeField] private Transform planeTransform;
 
     private MeshFilter targetMeshFilter;
     private Vector3[] localVertices;
     private int[] triangles;
+    private List<Vector3> capVertices = new List<Vector3>();
 
     private InputAction eAction;
 
@@ -43,6 +46,8 @@ public class MeshSliceReconstruction : MonoBehaviour
     public void SliceMesh()
     {
         if (planeTransform == null || targetMeshFilter == null) return;
+
+        capVertices.Clear();
 
         MeshData aboveMesh = new MeshData();
         MeshData belowMesh = new MeshData();
@@ -77,6 +82,9 @@ public class MeshSliceReconstruction : MonoBehaviour
                 SplitTriangle(aboveMesh, belowMesh, vertex0, vertex1, vertex2, dist0, dist1, dist2);
             }
         }
+
+        // Fill the exposed surface boundary
+        CapMesh(aboveMesh, belowMesh, localPlaneNormal);
 
         // Convert above and below mesh into real mesh objects
         GameObject aboveObject = CreateSlicedObject(aboveMesh, $"{gameObject.name}_Above");
@@ -129,6 +137,9 @@ public class MeshSliceReconstruction : MonoBehaviour
         
         Vector3 cutA = IntersectEdge(loneVert, pairVert1, loneDist, pairDist1);
         Vector3 cutB = IntersectEdge(loneVert, pairVert2, loneDist, pairDist2);
+
+        capVertices.Add(cutA);
+        capVertices.Add(cutB);
 
         MeshData loneSideMesh = (loneDist >= 0) ? above : below;
         MeshData pairSideMesh = (loneDist >= 0) ? below : above;
@@ -208,28 +219,64 @@ public class MeshSliceReconstruction : MonoBehaviour
 
         return slicedObject;
     }
-}
 
-/// <summary>
-/// Container for constructing dyn amic mesh vertices and triangle indices
-/// </summary>
-public class MeshData
-{
-    public List<Vector3> vertices = new List<Vector3>();
-    public List<int> triangles = new List<int>();
-
-    // Helper to add a vertex and find its index
-    public int AddVertex(Vector3 position)
+    /// <summary>
+    /// Generates the filling geometry across the cut opened from the boundary
+    /// </summary>
+    /// <param name="aboveMesh">Mesh data container for the above plane object</param>
+    /// <param name="belowMesh">Mesh data container for the below plane object</param>
+    /// <param name="planeNormal">Direction of the normal of the cutting plane</param>
+    private void CapMesh(MeshData aboveMesh, MeshData belowMesh, Vector3 planeNormal)
     {
-        vertices.Add(position);
-        return vertices.Count - 1;
-    }
+        if (capVertices.Count < 3) return;
 
-    // Helper to add a triangle using three vertices
-    public void AddTriangle(int indice0, int indice1, int indice2)
-    {
-        triangles.Add(indice0);
-        triangles.Add(indice1);
-        triangles.Add(indice2);
+        Vector3 centroid = Vector3.zero;
+        foreach (Vector3 point in capVertices)
+        {
+            centroid += point;
+        }
+        centroid /= capVertices.Count;
+
+        Vector3 planeTangent = Vector3.Cross(planeNormal, Vector3.up);
+        if (planeTangent.sqrMagnitude < 0.001f) // If the plane is pointing straight up or down
+        {
+            planeTangent = Vector3.Cross(planeNormal, Vector3.right);
+        }
+        planeTangent.Normalize();
+
+        Vector3 planeBitangent = Vector3.Cross(planeNormal, planeTangent).normalized;
+
+        capVertices.Sort((a, b) =>
+        {
+            Vector3 dirA = (a- centroid).normalized;
+            float xA = Vector3.Dot(dirA, planeTangent);
+            float yA = Vector3.Dot(dirA, planeBitangent);
+            float angleA = Mathf.Atan2(yA, xA);
+
+            Vector3 dirB = (b - centroid).normalized;
+            float xB = Vector3.Dot(dirB, planeTangent);
+            float yB = Vector3.Dot(dirB, planeBitangent);
+            float angleB = Mathf.Atan2(yB, xB);
+
+            return angleA.CompareTo(angleB);
+        });
+
+        for (int i = 0; i < capVertices.Count; i++)
+        {
+            Vector3 currentPoint = capVertices[i];
+            Vector3 nextPoint = capVertices[(i + 1) % capVertices.Count]; // Wrap to 0 once it reaches the end
+
+            // Above Mesh (facing down)
+            int cAbove = aboveMesh.AddVertex(centroid);
+            int currAbove = aboveMesh.AddVertex(currentPoint);
+            int nextAbove = aboveMesh.AddVertex(nextPoint);
+            aboveMesh.AddTriangle(cAbove, nextAbove, currAbove);
+
+            // Below Mesh (facing up)
+            int cBelow = belowMesh.AddVertex(centroid);
+            int currBelow = belowMesh.AddVertex(currentPoint);
+            int nextBelow = belowMesh.AddVertex(nextPoint);
+            belowMesh.AddTriangle(cBelow, currBelow, nextBelow);
+        }
     }
 }

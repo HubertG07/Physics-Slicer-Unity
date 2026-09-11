@@ -34,7 +34,7 @@ Breakdown of the time invested during development
 ## Technical Breakdown & Architecture
 Currently the pipeline operates on 3-stage modular workflow
 
-### Stage 1: Local-Space Vertex Classification
+### Stage 1: Local-Space Vertex Classification (MeshSliceTest.cs):
 * **Objective:** Determine which side of the plane, every mesh vertex resides on.
 * **Technical Overview:** Transforms the cutting plane's position and normal vector into the mesh's local space using `InverseTransformPoint` and `InverseTransformDirection`. Using the Dot Product equation:
 
@@ -44,7 +44,7 @@ $$d = (P_{\text{vertex}} - P_{\text{plane}}) \cdot \mathbf{N}_{\text{plane}}$$
     * $d \ge 0$: Vertex is infront or above the plane (Green Gizmo).
     * $d < 0$: Vertex is behind or below the plane (Red Gizmo).
 
-## Stage 2: Triangle Edge/Plane Intersection:
+## Stage 2: Triangle Edge/Plane Intersection (MeshSliceTriangles.cs):
 * **Objective:** Detect where the triangle edges cross the cutting boundary and find the split coordinates.
 * **Technical Overview:** Iterates over the mesh index (`triangles`). Tests each of the 3 edges per face using the signed distance product:
 
@@ -56,12 +56,20 @@ $$t = \frac{|distA|}{|distA| + |distB|}$$
 
 $$P_{\text{cut}} = \text{Vector3.Lerp}(VertexA, VertexB, t)$$
 
-## Stage 3: Dynamic Mesh Reconstruction:
+## Stage 3: Dynamic Mesh Reconstruction (MeshSliceReconstruction.cs):
 * **Objective:** Split crossed triangles into valid mesh sub-components and rebuild a new `GameObject` instance.
 * **Technical Overview:** * Uncut triangles pass directly to `AboveMesh` or `BelowMesh` buffers.
     * Intersected triangles split into 1 sub-triangle on the isolated vertex side and 2 sub-triangles (quadrilateral) on the paired vertex side
     * Preserves clockwise winding orders to surface the normals and lighting correctly
     * Recalculates the bounding boxes (`RecalculateBounds()` and surface normals (`RecalculateNormal()`))
+
+## Stage 4: Hole Filling & Surface Capping (MeshSliceFilling.cs):
+* **Objective:** Seal the open surface boundary created by the slicing operations
+* **Technical Overview:**
+    * **Centroid Computing:** Average the collected edge intersection points to generate a central vertex ($C$)
+    * **2D Plane Projection:** Derive the local tangent and bitangent vectors using the cross product to conver the 3D edge points into 2D planar offsets
+    * **Polar Angle Sorting:** Order the boundary vertices counter-clockwise using `Mathf.Atan2(y, x)`relative to the tangent plane
+    * **Triangle Fan Reconstruction:** Triangulates the sorted points around the centroid, reversing the index winding orders between the top and bottom sub-meshes to ensure correctly facing normals
 ---
 ## Takeaways & Learnings
 Building this slicer helped me learn critical low-level 3D graphics and physics concepts:
