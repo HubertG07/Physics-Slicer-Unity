@@ -3,7 +3,7 @@
 ---
 
 ## Preview & Demo
-Waiting for project to finish before adding the gif.
+![Mesh Slicing Demo](Media/slice_demo.gif)
 
 *Demonstation of the dynamic mesh slicing, plane intersection and mesh seperation.
 ---
@@ -18,16 +18,35 @@ The **Physics Slicer** is a procedural mesh manipulation system designed to slic
 * **Modular Pipeline Architecture:** Stages split across multiple test scripts to ensure accuracy and progress at every stage.
 ---
 
+## Table of Contents
+* [Preview & Demo](#preview--demo)
+* [Project Overview & Summary](#project-overview--summary)
+* [Project Logs and Time Tracking](#project-logs-and-time-tracking)
+* [Technical Breakdown & Architecture](#technical-breakdown--architecture)
+  * [Stage 1: Local-Space Vertex Classification](#stage-1-local-space-vertex-classification-meshslicetestcs)
+  * [Stage 2: Triangle Edge/Plane Intersection](#stage-2-triangle-edgeplane-intersection-meshslicetrianglescs)
+  * [Stage 3: Dynamic Mesh Reconstruction](#stage-3-dynamic-mesh-reconstruction-meshslicereconstructioncs)
+  * [Stage 4: Hole Filling & Surface Capping](#stage-4-hole-filling--surface-capping-meshslicefillingcs)
+  * [Stage 5: UV Interpolation & Planar Projection Mapping](#stage-5-uv-interpolation--planar-projection-mapping-meshsliceuvcs)
+  * [Stage 6: Dynamic Physics & Mass Distribution](#stage-6-dynamic-physics--mass-distribution-meshslicephysicscs)
+  * [Stage 7: Burst Optimization & Job System Parallelization](#stage-7-burst-optimization--job-system-parallelization-meshsliceoptimisationcs)
+* [Challenges & Optimization Hurdles](#challenges--optimization-hurdles)
+* [Takeaways & Key Learnings](#takeaways--key-learnings)
+* [How to Run & Usage](#how-to-run--usage)
+
 ## Project Logs and Time Tracking
 Breakdown of the time invested during development
 | Date | Time Window | Session Duration | Focus Area |
 | --- | --- | --- | --- |
 | **10th Sept 2026** | 18:25-20:54 | 2 hrs 29 mins | Plane dot product math & Dymanic mesh reconstruction (Stages 1-3) |
-| **11th Sept 2026** | 14:30-16:14 & 18:00-19:25 | 3hrs 9 mins | Cap filling. physics Rigidbody generation & potentially more |
+| **11th Sept 2026** | 14:30-16:14 & 18:00-19:25 | 3hrs 9 mins | Cap filling. Physics Rigidbody generation & Optimisation |
+| **12th Sept 2026** | 10:00-11:41 | 1hr 41 mins | Extra Optimisation |
+| **13th Seppt 2026** | 9:55-11:25 | 1hr 30 mins | Getting rid of managed GC allocation & Burst Accelerated Cap Generation |
+| **Future** | TBD | TBD | Optimise more. Main Thread Queue Draining, Fan triangulation cap & more manage memory allocations & ear clipping | 
 
 * **Project Start Date:** September 10th 2026
-* **Project Finish Date:** September 11th 2026
-* **Current Total Time:** 5 hrs 38 mins Hours (Finished)
+* **Project Finish Date:** Not finished yet
+* **Current Total Time:** 8 hrs 49 mins Hours (Ongoing)
 ---
 
 ## Technical Breakdown & Architecture
@@ -97,18 +116,40 @@ $$P_{\text{cut}} = \text{Vector3.Lerp}(VertexA, VertexB, t)$$
     $$\text{OutDistances}[i] = (\text{Vertices}[i] - \text{LocalPlanePosition}) \cdot \text{LocalPlaneNormal}$$
 ---
 
+## Challenges & Optimization Hurdles
+### 1. Eliminating Garbage Collection (GC) Pressure
+* **Problem:** The inital mesh splitting allocated array buffers (`List<Vector3>` and `Vector3[]`) every frame a cut occured. At runtime this would create hundreds of short-lived objects triggering frequent GC spikes, causing visual micro-stutters
+* **Solution:** Refactored the vertex distance classification to use native unmanaged memory (`NativeArray<Vector3>` and `NativeArray<float>`) backed with `Allocator.TempJob`. These buffers are allocated in contiguous memory blocks and get immediately freed when `.Dispose()` is ran, keeping main-thread GC allocation zero
+
+### 2. Burst-Compiling Generation
+* **Problem:** The job system was inititally limited because the native mesh operations couldn't easily be passed into the Burst-compiled code due to reference constraints (Like the standard Mesh class)
+* **Solution:** The raw geometric data structures were decoupled into unmanaged structs. Dedicated jobs (`ClassifyVerticesJob`) with `[BurstCompile(...)]` were written to execute vector SIMD operators across multiple worker threads
+
+### 3. Maintaining Correct Centroids & Inertia Tensors
+* **Problem:** Simply cutting the mesh and assigning a new collision geometry would cause rotated fragments to spin erratically off-center becuase Unity would calculate the inertia relative to the original object's local origin
+* **Solution:** Centroid offset adjustments were implemented. Every sub-mesh would shift its vertex position relative to its own center, repositioning the origin before calling `ResetCenterOfMass()` and `ResetInteriaTensor()`
+
 ## Takeaways & Learnings
-Building this slicer helped me learn critical low-level 3D graphics and physics concepts:
-1. **Coordinate Space Efficiency:** Performing the dot product on the vector in local object space helped to elimate the need of transforming thousands of mesh vertices into world space every frame.
-2. **Index Buffer Winding:** Re-indexing the triangles programmatically required a lot of attention to the clockwise order.
-3. **Memory Management:** Constructing temporary dynamic meshes required clean buffer instantialtion (`Vector3[]`, `int[]`) before calling `.ToArray()` to minimize GC allocations.
+1. **Local Space Math to Minimise Computing:** Transforming the 3D plane into local mesh space (`InverseTransformPoint`) to avoid transforming thousands of vertices into world space every frame.
+2. **Data-Oriented Design:** Transitioned heavy math loops from the traditional C# objects to flat and contiguous native arrays (`NativeArray<>`) which allowed hardware-level SIMD vector processing via the Burst compiler.
+3. **Tetrahedral Integration:** Learned to compute the exact sub-mesh volume using signed triple-product summation ($\mathbf{P}_1 \cdot (\mathbf{P}_2 \times \mathbf{P}_3) / 6$), allowing for physical mass to scale proportionally to it's geometry.
+4. **Planar Projection & Texture Mapping:** Generated dynamic and seamless UVs for capping faces by projecting the 3D point offsets onto local 2D orthonormal tangent axes ($\mathbf{U}, \mathbf{V}$) using scalar dot products.
+5. **Memory Safety in Unity Jobs:** Gained some practical experience handelling unmananged memory, avoiding native memory leaks through disciplined allocation (`Allocator.TempJob`) and explicit disposal.
 ---
 
-## How to Run & Usage (WIP)
-> **Note:** The project is still in active development. Usage instructions will be updated upon final release.
-### Stage 3 Instructions:
-1. Attach `MeshSliceReconstruction.cs` to the target GameObject, containing a `MeshFilter` and `MeshRenderer`.
-2. Reference a target `Transform` plane as the `planeTransform` (what will be doing the cutting)
-3. In Play Mode press the **[E]** key to trigger the slicing pipeline
+## How to Run & Usage
 
-Usage: Free to use without credit
+### Prerequisites
+* **Unity Version:** Unity 6000.5.9f1 or newer
+* **Required Packages:** Unity Mathematics, Burst, and the New Input System
+
+### Quick Start Guide
+1. Import `MeshSliceOptimisation.cs` and `MeshData.cs` into your Unity project's `Assets` folder.
+2. Attach the optimisation script to any 3D game object containing a `MeshFilter`, `MeshRenderer` and `RigidBody`.
+3. Create a 3D plane object into your scene to act as the cutting blade.
+4. Drag the plane object into the `planeTransform` field on the `MeshSliceOptimsation` component in the Inspector.
+5. Adjust the plane's height and rotation, using the inspectors gizmos to find the cut point.
+5. Enter Play Mode and press the **[E]** key to slice the object.
+
+### License & Usage
+This project is open-source and free to use, adapt or build upon without any credit :)

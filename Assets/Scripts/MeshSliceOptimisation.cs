@@ -1,11 +1,13 @@
 using System.Collections.Generic;
-using System.Net.Security;
 using Unity.Burst;
+using Unity.Burst.Intrinsics;
 using Unity.Collections;
 using Unity.Jobs;
+using Unity.Mathematics;
+using Unity.VisualScripting;
 using UnityEngine;
 using UnityEngine.InputSystem;
-using UnityEngine.SocialPlatforms;
+using UnityEngine.Rendering;
 
 /// <summary>
 /// Slices and reconstructs a mesh into two seperate game objects along a plane boundary
@@ -28,13 +30,24 @@ public class MeshSliceOptimisation : MonoBehaviour
     private Vector3[] localVertices;
     private Vector2[] localUVs;
     private int[] triangles;
-    private List<Vector3> capVertices = new List<Vector3>();
+    private NativeList<Vector3> capVertices;
+
+    private MeshData aboveMesh;
+    private MeshData belowMesh;
 
     private InputAction eAction;
 
     void Awake()
     {
         CacheComponents();
+
+        // Allocate the unmanaged NativeLists
+        int initialCapacity = localVertices != null ? localVertices.Length : 256;
+        aboveMesh = new MeshData(initialCapacity, Allocator.Persistent);
+        belowMesh = new MeshData(initialCapacity, Allocator.Persistent);
+
+        capVertices = new NativeList<Vector3>(64, Allocator.Persistent); 
+
         eAction = new InputAction(binding: "<Keyboard>/e");
         eAction.performed += OnEPressed;
     }
@@ -46,6 +59,11 @@ public class MeshSliceOptimisation : MonoBehaviour
     {
         eAction.performed -= OnEPressed;
         eAction.Dispose();
+
+        aboveMesh.Dispose();
+        belowMesh.Dispose();
+
+        capVertices.Dispose();
     }
 
     private void OnEPressed(InputAction.CallbackContext context)
@@ -60,18 +78,25 @@ public class MeshSliceOptimisation : MonoBehaviour
     {
         if (planeTransform == null || targetMeshFilter == null) return;
 
-        capVertices.Clear();
+        if (!capVertices.IsCreated) capVertices = new NativeList<Vector3>(64, Allocator.Persistent);
+        else capVertices.Clear();
 
-        MeshData aboveMesh = new MeshData();
-        MeshData belowMesh = new MeshData();
+        if (!aboveMesh.vertices.IsCreated) aboveMesh = new MeshData(localVertices.Length, Allocator.Persistent);
+        else aboveMesh.Clear();
+
+        if (!belowMesh.vertices.IsCreated) belowMesh = new MeshData(localVertices.Length, Allocator.Persistent);
+        else belowMesh.Clear();
 
         Vector3 localPlanePosition = transform.InverseTransformPoint(planeTransform.position);
         Vector3 localPlaneNormal = transform.InverseTransformDirection(planeTransform.up).normalized;
 
         int vertexCount = localVertices.Length;
+        int totalTriangles = triangles.Length / 3;
 
         // Allocate unmanaged NativeArrays
         NativeArray<Vector3> nativeVertices = new NativeArray<Vector3>(localVertices, Allocator.TempJob);
+        NativeArray<Vector2> nativeUVs = new NativeArray<Vector2>(localUVs, Allocator.TempJob);
+        NativeArray<int> nativeTriangles = new NativeArray<int>(triangles, Allocator.TempJob);
         NativeArray<float> nativeDistances = new NativeArray<float>(vertexCount, Allocator.TempJob);
 
         // Schedule & Execute the burst compiled job
@@ -83,58 +108,77 @@ public class MeshSliceOptimisation : MonoBehaviour
             OutDistances = nativeDistances
         };
 
-        JobHandle jobHandle = classifyJob.Schedule(vertexCount, 64);
-        jobHandle.Complete(); // Block until the parallel execution finishes
+        NativeQueue<SplitTriangleResult> resultQueue = new NativeQueue<SplitTriangleResult>(Allocator.TempJob);
+        NativeQueue<CapPointPair> capQueue = new NativeQueue<CapPointPair>(Allocator.TempJob);
 
-        for (int i = 0; i < triangles.Length; i += 3)
+        
+
+        SplitTranglesJob splitJob = new SplitTranglesJob
         {
-            
-            int idx0 = triangles[i];
-            int idx1 = triangles[i + 1];
-            int idx2 = triangles[i + 2];
+            Vertices = nativeVertices,
+            UVs = nativeUVs,
+            Triangles = nativeTriangles,
+            Distances = nativeDistances,
+            OutTriangles = resultQueue.AsParallelWriter(),
+            OutCapPoints = capQueue.AsParallelWriter()
+        };
 
-            // Fetch position of all 3 vertices of the triangle face
-            Vector3 vertex0 = localVertices[idx0];
-            Vector3 vertex1 = localVertices[idx1];
-            Vector3 vertex2 = localVertices[idx2];
+        // Classification and splitting across worker threads
+        JobHandle classifyHandle = classifyJob.Schedule(vertexCount, 64);
+        JobHandle splitHandle = splitJob.Schedule(totalTriangles, 32, classifyHandle);
+        splitHandle.Complete();
 
-            Vector2 uv0 = localUVs[idx0];
-            Vector2 uv1 = localUVs[idx1];
-            Vector2 uv2 = localUVs[idx2];
+        // Drain Results Linearly into the containers
+        while (resultQueue.TryDequeue(out SplitTriangleResult result))
+        {
+            MeshData targetMesh = result.IsAbove ? aboveMesh : belowMesh;
 
-            float dist0 = nativeDistances[idx0];
-            float dist1 = nativeDistances[idx1];
-            float dist2 = nativeDistances[idx2];
-
-            if (dist0 >= 0 && dist1 >= 0 && dist2 >= 0)
+            AddUncutTriangle(targetMesh, result.V0.Position, result.V0.UV,
+                                        result.V1.Position, result.V1.UV,
+                                        result.V2.Position, result.V2.UV);
+            if (result.TriangleCount == 2)
             {
-                // Uncut (everything is above)
-                AddUncutTriangle(aboveMesh, vertex0, uv0, vertex1, uv1, vertex2, uv2);
+                AddUncutTriangle(targetMesh, result.V3.Position, result.V3.UV,
+                                            result.V4.Position, result.V4.UV,
+                                            result.V5.Position, result.V5.UV);
             }
-            else if (dist0 < 0 && dist1 < 0 && dist2 < 0)
-            {
-                //Uncut (everything below)
-                AddUncutTriangle(belowMesh, vertex0, uv0, vertex1, uv1, vertex2, uv2);
-            }
-            else
-            {
-                // Split the triangles across the plane
-                SplitTriangle(aboveMesh, belowMesh, vertex0, uv0, vertex1, uv1, vertex2, uv2, dist0, dist1, dist2);
-            }
+        }
+
+        while (capQueue.TryDequeue(out CapPointPair capPair))
+        {
+            capVertices.Add(capPair.PointA);
+            capVertices.Add(capPair.PointB);
         }
 
         // Dispose native memory to prevent a memory leak
         nativeVertices.Dispose();
+        nativeUVs.Dispose();
+        nativeTriangles.Dispose();
         nativeDistances.Dispose();
+        resultQueue.Dispose();
+        capQueue.Dispose();
+
 
         // Fill the exposed surface boundary
-        CapMesh(aboveMesh, belowMesh, localPlaneNormal);
+        //CapMesh(aboveMesh, belowMesh, localPlaneNormal);
+        BuildCapMeshJob capJob = new BuildCapMeshJob
+        {
+            CapPoints = capVertices.AsArray(),
+            PlaneNormal = localPlaneNormal,
+            OutVerticesAbove = aboveMesh.vertices,
+            OutUVsAbove = aboveMesh.uvs,
+            OutTrianglesAbove = aboveMesh.triangles,
+            OutVerticesBelow = belowMesh.vertices,
+            OutUVsBelow = belowMesh.uvs,
+            OutTrianglesBelow = belowMesh.triangles
+        };
+        capJob.Schedule().Complete();
 
         // Check to ensure valid geometry was made
         if (aboveMesh.triangles.Count == 0 || belowMesh.triangles.Count == 0) return;
 
-        float volumeAbove = CalculateMeshVolume(aboveMesh.vertices, aboveMesh.triangles);
-        float volumeBelow = CalculateMeshVolume(belowMesh.vertices, belowMesh.triangles);
+        float volumeAbove = CalculateMeshVolume(aboveMesh.vertices.AsArray(), aboveMesh.triangles.AsArray());
+        float volumeBelow = CalculateMeshVolume(belowMesh.vertices.AsArray(), belowMesh.triangles.AsArray());
         float totalVolume = Mathf.Max(0.0001f, volumeAbove + volumeBelow);
 
         float massAbove = originalMass * (volumeAbove / totalVolume);
@@ -270,20 +314,43 @@ public class MeshSliceOptimisation : MonoBehaviour
     /// </summary>
     private GameObject CreateSlicedObject(MeshData meshData, string name, float mass, Vector3 localImpulseNormal)
     {
-        if (meshData.triangles.Count == 0) return null;
+        
+        int vertexCount = meshData.vertices.Length;
+        int indexCount = meshData.triangles.Length;
 
-        Vector3 localCenterOfMass = CalculateCentroid(meshData.vertices);
-        for (int i = 0; i < meshData.vertices.Count; i++)
+        if (vertexCount == 0 || vertexCount == 0) return null;
+
+        Vector3 localCenterOfMass = CalculateCentroid(meshData.vertices.AsArray());
+
+        NativeArray<VertexLayout> vertexBuffer = new NativeArray<VertexLayout>(vertexCount, Allocator.Temp);
+        for (int i = 0; i < vertexCount; i++)
         {
-            meshData.vertices[i] -= localCenterOfMass;
+            vertexBuffer[i] = new VertexLayout
+            {
+                Position = meshData.vertices[i] - localCenterOfMass,
+                UV = meshData.uvs[i]
+            };
         }
 
         // Build new Unity Mesh Object
         Mesh newMesh = new Mesh();
         newMesh.name = name + "_Mesh";
-        newMesh.vertices = meshData.vertices.ToArray();
-        newMesh.uv = meshData.uvs.ToArray();
-        newMesh.triangles = meshData.triangles.ToArray();
+
+        NativeArray<VertexAttributeDescriptor> layout = new NativeArray<VertexAttributeDescriptor>(2, Allocator.Temp);
+        layout[0] = new VertexAttributeDescriptor(VertexAttribute.Position, VertexAttributeFormat.Float32, 3);
+        layout[1] = new VertexAttributeDescriptor(VertexAttribute.TexCoord0, VertexAttributeFormat.Float32, 2);
+
+        newMesh.SetVertexBufferParams(vertexCount, layout);
+        newMesh.SetVertexBufferData(vertexBuffer, 0, 0, vertexCount);
+
+        newMesh.SetIndexBufferParams(indexCount, IndexFormat.UInt32);
+        newMesh.SetIndexBufferData(meshData.triangles.AsArray(), 0, 0, indexCount);
+
+        newMesh.subMeshCount = 1;
+        newMesh.SetSubMesh(0, new SubMeshDescriptor(0, indexCount));
+
+        layout.Dispose();
+        vertexBuffer.Dispose();
 
         // Recalculate properties for lighting and rendering
         newMesh.RecalculateNormals();
@@ -333,16 +400,17 @@ public class MeshSliceOptimisation : MonoBehaviour
     /// <param name="aboveMesh">Mesh data container for the above plane object</param>
     /// <param name="belowMesh">Mesh data container for the below plane object</param>
     /// <param name="planeNormal">Direction of the normal of the cutting plane</param>
-    private void CapMesh(MeshData aboveMesh, MeshData belowMesh, Vector3 planeNormal)
+    /*private void CapMesh(MeshData aboveMesh, MeshData belowMesh, Vector3 planeNormal)
     {
-        if (capVertices.Count < 3) return;
+        int capCount = capVertices.Length;
+        if (capCount < 3) return;
 
         Vector3 centroid = Vector3.zero;
-        foreach (Vector3 point in capVertices)
+        for (int i = 0; i < capCount; i++)
         {
-            centroid += point;
+            centroid += capVertices[i];
         }
-        centroid /= capVertices.Count;
+        centroid /= capCount;
 
         Vector3 planeTangent = Vector3.Cross(planeNormal, Vector3.up);
         if (planeTangent.sqrMagnitude < 0.001f) // If the plane is pointing straight up or down
@@ -353,25 +421,34 @@ public class MeshSliceOptimisation : MonoBehaviour
 
         Vector3 planeBitangent = Vector3.Cross(planeNormal, planeTangent).normalized;
 
-        capVertices.Sort((a, b) =>
+        for (int i = 0; i < capCount; i++)
         {
-            Vector3 dirA = (a- centroid).normalized;
-            float xA = Vector3.Dot(dirA, planeTangent);
-            float yA = Vector3.Dot(dirA, planeBitangent);
-            float angleA = Mathf.Atan2(yA, xA);
+            int minIdx = i;
+            float minAngle = GetAngle(capVertices[i], centroid, planeTangent, planeBitangent);
 
-            Vector3 dirB = (b - centroid).normalized;
-            float xB = Vector3.Dot(dirB, planeTangent);
-            float yB = Vector3.Dot(dirB, planeBitangent);
-            float angleB = Mathf.Atan2(yB, xB);
+            for (int j = i + 1; j < capCount; j++)
+            {
+                float angle = GetAngle(capVertices[j], centroid, planeTangent, planeBitangent);
+                if (angle < minAngle)
+                {
+                    minAngle = angle;
+                    minIdx = j;
+                }
+            }
 
-            return angleA.CompareTo(angleB);
-        });
+            if (minIdx != i)
+            {
+                Vector3 temp = capVertices[i];
+                capVertices[i] = capVertices[minIdx];
+                capVertices[minIdx] = temp;
+            }
+        }
 
-        for (int i = 0; i < capVertices.Count; i++)
+
+        for (int i = 0; i < capCount; i++)
         {
             Vector3 currentPoint = capVertices[i];
-            Vector3 nextPoint = capVertices[(i + 1) % capVertices.Count]; // Wrap to 0 once it reaches the end
+            Vector3 nextPoint = capVertices[(i + 1) % capCount]; // Wrap to 0 once it reaches the end
 
             // Project positions relevative to centroid onto the tangent axes to generate the UVs
             Vector2 cUV = new Vector2(0.5f, 0.5f);
@@ -390,28 +467,36 @@ public class MeshSliceOptimisation : MonoBehaviour
             int nextBelow = belowMesh.AddVertex(nextPoint, nextUV);
             belowMesh.AddTriangle(cBelow, currBelow, nextBelow);
         }
+    }*/ // Unused old function, replaced with BuildCapMeshJob
+
+    private static float GetAngle(Vector3 point, Vector3 centroid, Vector3 tangent, Vector3 bitangent)
+    {
+        Vector3 dir = (point - centroid).normalized;
+        float x = Vector3.Dot(dir, tangent);
+        float y = Vector3.Dot(dir, bitangent);
+        return Mathf.Atan2(y, x);
     }
 
     /// <summary>
     /// Calculate local center of mass of sub mesh verticies
     /// </summary>
-    private Vector3 CalculateCentroid(List<Vector3> vertices)
+    private Vector3 CalculateCentroid(NativeArray<Vector3> vertices)
     {
         Vector3 sum = Vector3.zero;
-        for (int i =0; i < vertices.Count; i++)
+        for (int i =0; i < vertices.Length; i++)
         {
             sum += vertices[i];
         }
-        return sum / vertices.Count;
+        return sum / vertices.Length;
     }
     
     /// <summary>
     /// Calculate the volume of a closed triangle mesh using tetrahedral decomposition
     /// </summary>
-    private float CalculateMeshVolume(List<Vector3> verts, List<int> tris)
+    private float CalculateMeshVolume(NativeArray<Vector3> verts, NativeArray<int> tris)
     {
         float volume = 0f;
-        for (int i = 0; i < tris.Count; i += 3)
+        for (int i = 0; i < tris.Length; i += 3)
         {
             Vector3 p1 = verts[tris[i]];
             Vector3 p2 = verts[tris[i + 1]];
@@ -435,4 +520,279 @@ public struct ClassifyVerticesJob : IJobParallelFor
         Vector3 vertex = Vertices[index];
         OutDistances[index] = Vector3.Dot((vertex - LocalPlanePosition), LocalPlaneNormal);
     }
+}
+
+[BurstCompile(CompileSynchronously = true, FloatMode = FloatMode.Fast)]
+public struct SplitTranglesJob : IJobParallelFor
+{
+    [ReadOnly] public NativeArray<Vector3> Vertices;
+    [ReadOnly] public NativeArray<Vector2> UVs;
+    [ReadOnly] public NativeArray<int> Triangles;
+    [ReadOnly] public NativeArray<float> Distances;
+
+    public NativeQueue<SplitTriangleResult>.ParallelWriter OutTriangles;
+    public NativeQueue<CapPointPair>.ParallelWriter OutCapPoints;
+
+    public void Execute(int index)
+    {
+        int triIdx = index * 3;
+        int idx0 = Triangles[triIdx];
+        int idx1 = Triangles[triIdx + 1];
+        int idx2 = Triangles[triIdx + 2];
+
+        Vector3 vertex0 = Vertices[idx0]; Vector3 vertex1 = Vertices[idx1]; Vector3 vertex2 = Vertices[idx2];
+        Vector2 uv0 = UVs[idx0]; Vector2 uv1 = UVs[idx1]; Vector2 uv2 = UVs[idx2];
+        float dist0 = Distances[idx0]; float dist1 = Distances[idx1]; float dist2 = Distances[idx2];
+
+        // All Above
+        if (dist0 >= 0 && dist1 >= 0 && dist2 >= 0)
+        {
+            OutTriangles.Enqueue(new SplitTriangleResult
+            {
+                V0 = new CutVertex { Position = vertex0, UV = uv0 },
+                V1 = new CutVertex { Position = vertex1, UV = uv1 },
+                V2 = new CutVertex { Position = vertex2, UV = uv2 },
+                TriangleCount = 1,
+                IsAbove = true
+            });
+        }
+        // All Below
+        else if (dist0 < 0 && dist1 < 0 && dist2 < 0)
+        {
+            OutTriangles.Enqueue(new SplitTriangleResult
+            {
+                V0 = new CutVertex { Position = vertex0, UV = uv0 },
+                V1 = new CutVertex { Position = vertex1, UV = uv1 },
+                V3 = new CutVertex { Position = vertex2, UV = uv2 },
+                TriangleCount = 1,
+                IsAbove = false
+            });
+        }
+        // Split across the cut
+        else
+        {
+            SplitSingleTriangle(vertex0, uv0, dist0, vertex1, uv1, dist1, vertex2, uv2, dist2);
+        }
+    }
+
+    private void SplitSingleTriangle(Vector3 v0, Vector2 uv0, float d0,
+                                    Vector3 v1, Vector2 uv1, float d1,
+                                    Vector3 v2, Vector2 uv2, float d2)
+    {
+        Vector3 loneVert, pair1Vert, pair2Vert;
+        Vector2 loneUV, pair1UV, pair2UV;
+        float loneDist, pair1Dist, pair2Dist;
+
+        if ((d0 >= 0 && d1 < 0 && d2 < 0) || (d0 < 0 && d1 >= 0 && d2 >= 0))
+        {
+            loneVert = v0; loneUV = uv0; loneDist = d0;
+            pair1Vert = v1; pair1UV = uv1; pair1Dist = d1;
+            pair2Vert = v2; pair2UV = uv2; pair2Dist = d2;
+        }
+        else if ((d1 >= 0 && d0 < 0 && d2 < 0) || (d1 < 0 && d0 >= 0 && d2 >= 0))
+        {
+            loneVert = v1; loneUV = uv1; loneDist = d1;
+            pair1Vert = v2; pair1UV = uv2; pair1Dist = d2;
+            pair2Vert = v0; pair2UV = uv0; pair2Dist = d0;
+        }
+        else
+        {
+            loneVert = v2; loneUV = uv2; loneDist = d2;
+            pair1Vert = v0; pair1UV = uv0; pair1Dist = d0;
+            pair2Vert = v1; pair2UV = uv1; pair2Dist = d1;
+        }
+
+        CutVertex cutA = Intersect(loneVert, loneUV, pair1Vert, pair1UV, loneDist, pair1Dist);
+        CutVertex cutB = Intersect(loneVert, loneUV, pair2Vert, pair2UV, loneDist, pair2Dist);
+
+        OutCapPoints.Enqueue(new CapPointPair { PointA = cutA.Position, PointB = cutB.Position });
+
+        bool loneIsAbove = loneDist >= 0;
+
+        // Lone side triangle
+        OutTriangles.Enqueue(new SplitTriangleResult
+        {
+            V0 = new CutVertex { Position = loneVert, UV = loneUV },
+            V1 = cutA,
+            V2 = cutB,
+            TriangleCount = 1,
+            IsAbove = loneIsAbove
+        });
+
+        // Pair side quad
+        OutTriangles.Enqueue(new SplitTriangleResult
+        {
+            V0 = new CutVertex { Position = pair1Vert, UV = pair1UV },
+            V1 = new CutVertex { Position = pair2Vert, UV = pair2UV },
+            V2 = cutA,
+            V3 = new CutVertex { Position = pair2Vert, UV = pair2UV },
+            V4 = cutB,
+            V5 = cutA,
+            TriangleCount = 2,
+            IsAbove = !loneIsAbove
+        });
+    }
+
+    private CutVertex Intersect(Vector3 vA, Vector2 uvA, Vector3 vB, Vector2 uvB, float dA, float dB)
+    {
+        float denom = math.abs(dA) + math.abs(dB);
+        if (denom < 0.000001f) return new CutVertex { Position = vA, UV = uvA };
+        float t = math.abs(dA) / denom;
+        return new CutVertex
+        {
+            Position = math.lerp(vA, vB, t),
+            UV = math.lerp(uvA, uvB, t)
+        };
+    }
+}
+
+[BurstCompile(CompileSynchronously = true, FloatMode = FloatMode.Fast)]
+public struct BuildCapMeshJob : IJob
+{
+    [ReadOnly] public NativeArray<Vector3> CapPoints;
+    public Vector3 PlaneNormal;
+    
+    public NativeList<Vector3> OutVerticesAbove;
+    public NativeList<Vector2> OutUVsAbove;
+    public NativeList<int> OutTrianglesAbove;
+
+    public NativeList<Vector3> OutVerticesBelow;
+    public NativeList<Vector2> OutUVsBelow;
+    public NativeList<int> OutTrianglesBelow;
+
+    private struct SortedPoint
+    {
+        public Vector3 Position;
+        public float Angle;
+    }
+
+    public void Execute()
+    {
+        int count = CapPoints.Length;
+        if (count < 3) return;
+
+        Vector3 centroid = Vector3.zero;
+        for (int i = 0; i < count; i++)
+        {
+            centroid += CapPoints[i];
+        }
+        centroid /= count;
+
+        Vector3 planeTangent = math.cross(PlaneNormal, new Vector3(0, 1, 0));
+        if (math.lengthsq(planeTangent) < 0.001f)
+        {
+            planeTangent = math.cross(PlaneNormal, new Vector3(1, 0, 0));
+        }
+        planeTangent = math.normalize(planeTangent);
+        Vector3 planeBitangent = math.normalize(math.cross(PlaneNormal, planeTangent));
+
+        NativeArray<SortedPoint> sortedPoints = new NativeArray<SortedPoint>(count, Allocator.Temp);
+        for (int i = 0; i < count; i++)
+        {
+            Vector3 point = CapPoints[i];
+            Vector3 direction = point - centroid;
+            float x = math.dot(direction, planeTangent);
+            float y = math.dot(direction, planeBitangent);
+
+            sortedPoints[i] = new SortedPoint
+            {
+                Position = point,
+                Angle = math.atan2(y, x)
+            };
+        }
+
+        QuickSort(sortedPoints, 0, count - 1);
+
+        Vector2 cUV = new Vector2(0.5f, 0.5f);
+
+        for (int i = 0; i < count; i++)
+        {
+            Vector3 currentPoint = sortedPoints[i].Position;
+            Vector3 nextPoint = sortedPoints[(i + 1) % count].Position;
+
+            Vector2 currUV = new Vector2(math.dot((currentPoint - centroid), planeTangent), math.dot((currentPoint - centroid), planeBitangent));
+            Vector2 nextUV = new Vector2(math.dot((nextPoint - centroid), planeTangent), math.dot((nextPoint - centroid), planeBitangent));
+
+            // Above Mesh Cap
+            int cAbove = AddVertex(OutVerticesAbove, OutUVsAbove, centroid, cUV);
+            int currAbove = AddVertex(OutVerticesAbove, OutUVsAbove, currentPoint, currUV);
+            int nextAbove = AddVertex(OutVerticesAbove, OutUVsAbove, nextPoint, nextUV);
+            AddTriangle(OutTrianglesAbove, cAbove, nextAbove, currAbove);
+
+            // Below Mesh Cap
+            int cBelow = AddVertex(OutVerticesBelow, OutUVsBelow, centroid, cUV);
+            int currBelow = AddVertex(OutVerticesBelow, OutUVsBelow, currentPoint, currUV);
+            int nextBelow = AddVertex(OutVerticesBelow, OutUVsBelow, nextPoint, nextUV);
+            // FIX 2: Target OutTrianglesBelow and adjust winding order for inverted normal
+            AddTriangle(OutTrianglesBelow, cBelow, currBelow, nextBelow); 
+        }
+
+        sortedPoints.Dispose();
+    }
+
+    private int AddVertex(NativeList<Vector3> verts, NativeList<Vector2> uvs, Vector3 position, Vector2 uv)
+    {
+        verts.Add(position);
+        uvs.Add(uv);
+        return verts.Length - 1;
+    }
+
+    private void AddTriangle(NativeList<int> tris, int indice0, int indice1, int indice2)
+    {
+        tris.Add(indice0);
+        tris.Add(indice1);
+        tris.Add(indice2);
+    }
+
+    private void QuickSort(NativeArray<SortedPoint> arr, int left, int right)
+    {
+        if (left >= right) return;
+        float pivot = arr[(left + right) / 2].Angle;
+        int i = left, j = right;
+
+        while (i <= j)
+        {
+            while (arr[i].Angle < pivot) i++;
+            while (arr[j].Angle > pivot) j--;
+            if (i <= j)
+            {
+                SortedPoint temp = arr[i];
+                arr[i] = arr[j];
+                arr[j] = temp;
+                i++;
+                j--;
+            }
+        }
+
+        if (left < j) QuickSort(arr, left, j);
+        if (i < right) QuickSort(arr, i, right);
+    }
+}
+
+public struct CutVertex
+{
+    public Vector3 Position;
+    public Vector2 UV;
+}
+
+public struct SplitTriangleResult
+{
+    // Up to two triangles get created
+    public CutVertex V0, V1, V2;
+    public CutVertex V3, V4, V5;
+    public int TriangleCount; // 1 or 2
+    public bool IsAbove;
+}
+
+public struct CapPointPair
+{
+    public Vector3 PointA;
+    public Vector3 PointB;
+}
+
+[System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+public struct VertexLayout
+{
+    public Vector3 Position;
+    public Vector2 UV;
 }

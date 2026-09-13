@@ -8,7 +8,7 @@ using UnityEngine.InputSystem;
 [RequireComponent(typeof(MeshFilter), typeof(MeshRenderer), typeof(Rigidbody))]
 public class MeshSlicePhysics : MonoBehaviour
 {
-    [SerializeField] private Transform planeTransform;
+    /*[SerializeField] private Transform planeTransform;
     
     [Header("Physics Settings")]
     [Tooltip("Impulse force applied to the cut plane to push the sliced pieces apart")]
@@ -387,5 +387,5 @@ public class MeshSlicePhysics : MonoBehaviour
             volume += Vector3.Dot(p1, Vector3.Cross(p2, p3)) / 6.0f;
         }
         return Mathf.Abs(volume);
-    }
+    }*/
 }
