@@ -41,12 +41,12 @@ Breakdown of the time invested during development
 | **10th Sept 2026** | 18:25-20:54 | 2 hrs 29 mins | Plane dot product math & Dymanic mesh reconstruction (Stages 1-3) |
 | **11th Sept 2026** | 14:30-16:14 & 18:00-19:25 | 3hrs 9 mins | Cap filling. Physics Rigidbody generation & Optimisation |
 | **12th Sept 2026** | 10:00-11:41 | 1hr 41 mins | Extra Optimisation |
-| **13th Seppt 2026** | 9:55-11:25 | 1hr 30 mins | Getting rid of managed GC allocation & Burst Accelerated Cap Generation |
-| **Future** | TBD | TBD | Optimise more. Main Thread Queue Draining, Fan triangulation cap & more manage memory allocations & ear clipping | 
+| **13th Sept 2026** | 9:55-11:25 | 1hr 30 mins | Getting rid of managed GC allocation & Burst Accelerated Cap Generation |
+| **Future Updates/Improvements** | TBD | TBD | Optimise more. Main Thread Queue Draining, Fan triangulation cap & more manage memory allocations & ear clipping | 
 
 * **Project Start Date:** September 10th 2026
-* **Project Finish Date:** Not finished yet
-* **Current Total Time:** 8 hrs 49 mins Hours (Ongoing)
+* **Project Finish Date:** Setember 13th 2026
+* **Current Total Time:** 8 hrs 49 mins Hours (Finished)
 ---
 
 ## Technical Breakdown & Architecture
